@@ -11,7 +11,6 @@ import joblib
 import numpy as np
 import open3d as o3d
 import pandas as pd
-import rembg
 import streamlit as st
 
 from custom_processor import (
@@ -30,6 +29,28 @@ from custom_processor import (
 )
 from volume_sliced_hull import compute_sliced_hull_volume
 from predict_weight import extract_measurements_from_3d, predict_weight
+
+@st.cache_data
+def get_pcd_spatial_info(clean_ply_path_str: str, merged_ply_path_str: str):
+    clean_p = Path(clean_ply_path_str)
+    merged_p = Path(merged_ply_path_str)
+    pcd = o3d.io.read_point_cloud(str(clean_p))
+    pts = np.asarray(pcd.points)
+    raw_pts = len(o3d.io.read_point_cloud(str(merged_p)).points) if merged_p.exists() else len(pts)
+    return raw_pts, len(pts), float(np.ptp(pts[:, 0])), float(np.ptp(pts[:, 1])), float(np.ptp(pts[:, 2]))
+
+@st.cache_data
+def get_cached_volume(clean_ply_path_str: str):
+    return compute_sliced_hull_volume(Path(clean_ply_path_str), step_m=0.02)
+
+@st.cache_data
+def get_cached_measurements(clean_ply_path_str: str):
+    return extract_measurements_from_3d(Path(clean_ply_path_str))
+
+@st.cache_data
+def get_ply_bytes(ply_path_str: str) -> bytes:
+    with open(ply_path_str, "rb") as f:
+        return f.read()
 
 # -----------------------------------------------------------------------------
 # Page Configuration & Warm Luxury Styling (Söl Haus Theme)
@@ -297,8 +318,7 @@ def render_spatial_summary(clean_ply: Path, raw_pts: int, clean_pts: int, sx: fl
 
     st.write("")
     if clean_ply.exists():
-        with open(clean_ply, "rb") as f:
-            ply_bytes = f.read()
+        ply_bytes = get_ply_bytes(str(clean_ply))
         col_dl, _ = st.columns([1.6, 2.4])
         with col_dl:
             st.download_button(
@@ -527,17 +547,15 @@ with tab_main:
         )
 
         if clean_ply_path.exists():
-            pcd = o3d.io.read_point_cloud(str(clean_ply_path))
-            pts = np.asarray(pcd.points)
-            raw_pts = len(o3d.io.read_point_cloud(str(merged_ply_path)).points) if merged_ply_path.exists() else len(pts)
+            raw_pts, clean_pts, sx, sy, sz = get_pcd_spatial_info(str(clean_ply_path), str(merged_ply_path))
 
             render_spatial_summary(
                 clean_ply_path,
                 raw_pts,
-                len(pts),
-                float(np.ptp(pts[:, 0])),
-                float(np.ptp(pts[:, 1])),
-                float(np.ptp(pts[:, 2])),
+                clean_pts,
+                sx,
+                sy,
+                sz,
                 f"cow_{cow_id:03d}_clean.ply",
             )
 
@@ -558,8 +576,8 @@ with tab_main:
         )
 
         if clean_ply_path.exists():
-            vol_data = compute_sliced_hull_volume(clean_ply_path, step_m=0.02)
-            meas_3d = extract_measurements_from_3d(clean_ply_path)
+            vol_data = get_cached_volume(str(clean_ply_path))
+            meas_3d = get_cached_measurements(str(clean_ply_path))
 
             pred_wt_3d, feature_cols = predict_weight(meas_3d, MODEL_PATH)
 
@@ -732,6 +750,7 @@ with tab_main:
                     st.stop()
 
                 with st.spinner("Processing custom segmentation, 3D projection, and biometric estimation..."):
+                    import rembg
                     session = rembg.new_session("u2net")
                     clouds = {}
                     for v in ["Top", "Left", "Right"]:

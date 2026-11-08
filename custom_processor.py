@@ -10,7 +10,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import open3d as o3d
-import rembg
 
 
 # Default Kinect v2 camera intrinsics (424x512 depth / registered RGB)
@@ -105,6 +104,7 @@ def segment_view_rgbd(
     rgb = cv2.cvtColor(rgb_bgr, cv2.COLOR_BGR2RGB)
 
     # 1. U²-Net Matting & Morphological Closing
+    import rembg
     alpha = rembg.remove(rgb, session=session, only_mask=True)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     closed_alpha = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, kernel, iterations=2)
